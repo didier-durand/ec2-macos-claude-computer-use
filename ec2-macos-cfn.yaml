@@ -1,0 +1,196 @@
+# https://w.amazon.com/bin/view/EC2-Mac-Instances/
+# access: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/connect-to-mac-instance.html
+# Connection: https://community.aws/content/2duUtYq4ENzOLGLdEg0A3aeyCuj/ec2-mac-02-connect-to-an-ec2-mac-instance?lang=en
+
+AWSTemplateFormatVersion: 2010-09-09
+
+#role: arn:aws:iam::076516228660:role/bedrock-full-access-role
+
+Parameters:
+
+  HostId:
+    Type: String
+    Description: 'Host id'
+    Default: 'h-05cec09b41d1681aa'
+
+  AvailabilityZone:
+    Type: String
+    Description: 'Availability zone for dedicated host'
+    Default: 'us-east-2c'
+
+  Tenancy:
+    Type: String
+    Description: 'Tenancy for instance (= host required when dedicated host)'
+    Default: 'host' # default | dedicated | host
+
+
+  InstanceType:
+    Type: String
+    Description: 'Instance type (must match host instance type)'
+    Default: 'mac1.metal'
+
+  AmiId:
+    Type: AWS::EC2::Image::Id
+    Description: 'Base image id for MacOS'
+    # Default: 'ami-02734e2276a65e7e2' # region: us-east-2 & name: amzn-ec2-macos-15.0-20241024-033206-arm64
+    Default: 'ami-0e391b6fad97f1d4a' # region: us-east-2 & name: amzn-ec2-macos-15.0-20241024-230723 for x86
+
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: 'EC2 key for remote access'
+    Default: 'macos-didduran-us-east-2'
+
+Resources:
+
+  Ec2Instance:
+    Type: AWS::EC2::Instance
+    #CreationPolicy:
+    # ResourceSignal:
+    #   Timeout: 'PT1H'
+    Properties:
+      HostId: !Ref HostId
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      Tenancy: !Ref Tenancy
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: 'true'
+          DeleteOnTermination: 'true'
+          DeviceIndex: 0
+          GroupSet:
+            - !Ref InstanceSecurityGroup
+          SubnetId: !Ref Subnet1
+      TagSpecifications:
+        - ResourceType: 'instance'
+          Tags:
+            - Key: Name
+              Value: !Join
+                - '-'
+                - - !Ref Repj
+                  - 'cfn-ec2-instance'
+                  - !GetAtt UniqueSuffix.Value
+#      UserData: !Base64
+#        Fn::Sub: |
+#          #!/bin/bash -xe
+#          curl https://github.com/mas-cli/mas/releases/download/v1.8.6/mas.pkg --output mas.pkg
+#          installer -pkg mas.pkg -target /
+#          mas install 497799835
+#          xcode-select -s /Applications/Xcode.app/Content/Developer
+#          xcode-select --install
+#          sleep 1
+#          osascript << EOD
+#            tell application "System Events"
+#              tell process "Install Command Line Developer Tools"
+#                keystroke return
+#                click button "Agree" of window "License Agreement"
+#              end tell
+#            end tell
+#          EOD
+#          /usr/bin/pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+#          /usr/local/bin/cfn-signal -e $? --stack '${AWS::StackName}' --resource 'macOSInstance' --region '${AWS::Region}'
+
+
+  Ec2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: 'cfn-macos-instance-profile'
+      Roles:
+        - !Ref Ec2ExecutionRole
+
+  Ec2ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 'cfn-macos-execution-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'ec2.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+
+    Ec2ExecutionPolicy:
+      Type: 'AWS::IAM::RolePolicy'
+      Properties:
+        PolicyName: 'cfn-macos-execution-policy'
+        RoleName: !Ref Ec2ExecutionRole
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: 'Allow'
+              Action: 'bedrock:*'
+              Resource: '*'
+            - Effect: 'Allow'
+              Action: 'iam:ListRoles'
+              Resource: '*'
+            - Effect: 'Allow'
+              Action:
+                - 's3:Get*',
+                - 's3:List*',
+                - 's3:Describe*',
+                - 's3-object-lambda:Get*',
+                - 's3-object-lambda:List*'
+              Resource: '*'
+
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Enable SSH access only'
+      GroupName: 'macos-sg'
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - CidrIp: '0.0.0.0/0'
+          FromPort: 22  # ssh
+          IpProtocol: tcp
+          ToPort: 22
+
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: '10.0.0.0/16'
+      EnableDnsHostnames: 'true'
+      EnableDnsSupport: 'true'
+
+  Subnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Ref AvailabilityZone
+      CidrBlock: '10.0.10.0/24'
+      VpcId: !Ref Vpc
+
+  Igw:
+    Type: AWS::EC2::InternetGateway
+
+  VpcIgwAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref Igw
+      VpcId: !Ref Vpc
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+
+  RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTable
+      SubnetId: !Ref Subnet1
+
+  DefaultRoute:
+    DependsOn: VpcIgwAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref Igw
+      RouteTableId: !Ref RouteTable
+
+  UniqueSuffix:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Type: 'String'
+      Value: !Select [ 0, !Split [ '-', !Select [ 2, !Split [ /, !Ref AWS::StackId ] ] ] ]
