@@ -1,3 +1,4 @@
+# source: https://gist.github.com/nnsnodnb/9a5346c8561208e45ff5177768ef5682
 # https://w.amazon.com/bin/view/EC2-Mac-Instances/
 # access: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/connect-to-mac-instance.html
 # Connection: https://community.aws/content/2duUtYq4ENzOLGLdEg0A3aeyCuj/ec2-mac-02-connect-to-an-ec2-mac-instance?lang=en
@@ -11,7 +12,9 @@ Parameters:
   HostId:
     Type: String
     Description: 'Host id'
-    Default: 'h-05cec09b41d1681aa'
+    # Default: 'h-05cec09b41d1681aa' # MacOS CFN1
+    # Default: 'h-01ffdad790a25a210' # MacOS CFN2
+    Default: 'h-073d5194aaffa1a41' # MacOS CFN3
 
   AvailabilityZone:
     Type: String
@@ -60,47 +63,51 @@ Resources:
           GroupSet:
             - !Ref InstanceSecurityGroup
           SubnetId: !Ref Subnet1
-      TagSpecifications:
-        - ResourceType: 'instance'
-          Tags:
-            - Key: Name
-              Value: !Join
-                - '-'
-                - - !Ref Repj
-                  - 'cfn-ec2-instance'
-                  - !GetAtt UniqueSuffix.Value
-#      UserData: !Base64
-#        Fn::Sub: |
-#          #!/bin/bash -xe
-#          curl https://github.com/mas-cli/mas/releases/download/v1.8.6/mas.pkg --output mas.pkg
-#          installer -pkg mas.pkg -target /
-#          mas install 497799835
-#          xcode-select -s /Applications/Xcode.app/Content/Developer
-#          xcode-select --install
-#          sleep 1
-#          osascript << EOD
-#            tell application "System Events"
-#              tell process "Install Command Line Developer Tools"
-#                keystroke return
-#                click button "Agree" of window "License Agreement"
-#              end tell
-#            end tell
-#          EOD
-#          /usr/bin/pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
-#          /usr/local/bin/cfn-signal -e $? --stack '${AWS::StackName}' --resource 'macOSInstance' --region '${AWS::Region}'
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - 'cfn-macos-instance'
+              - !GetAtt UniqueSuffix.Value
+      UserData: !Base64
+        Fn::Sub: |
+          # allow remote screen sharing with MacOS VNC client
+          sudo launchctl enable system/com.apple.screensharing
+          sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist
+          
+          # brew install wget, aws-cli and Python 3.12
+          brew upgrade
+          brew install wget
+          brew install aws-cli
+          brew install python@3.12
+          
+          # install docker
+          wget --no-check-certificate https://desktop.docker.com/mac/main/amd64/Docker.dmg
+          sudo hdiutil attach Docker.dmg
+          sudo /Volumes/Docker/Docker.app/Contents/MacOS/install
+          sudo hdiutil detach /Volumes/Docker
+
+          /usr/bin/pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+          #/usr/local/bin/cfn-signal -e $? --stack '${AWS::StackName}' --resource 'Ec2Instance' --region '${AWS::Region}'
 
 
   Ec2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
-      InstanceProfileName: 'cfn-macos-instance-profile'
+      InstanceProfileName: !Join
+            - '-'
+            - - 'cfn-macos-instance-profile'
+              - !GetAtt UniqueSuffix.Value
       Roles:
         - !Ref Ec2ExecutionRole
 
   Ec2ExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: 'cfn-macos-execution-role'
+      RoleName: !Join
+            - '-'
+            - - 'cfn-macos-execution-role'
+              - !GetAtt UniqueSuffix.Value
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -111,40 +118,58 @@ Resources:
             Action:
               - 'sts:AssumeRole'
 
-    Ec2ExecutionPolicy:
-      Type: 'AWS::IAM::RolePolicy'
-      Properties:
-        PolicyName: 'cfn-macos-execution-policy'
-        RoleName: !Ref Ec2ExecutionRole
-        PolicyDocument:
-          Version: "2012-10-17"
-          Statement:
-            - Effect: 'Allow'
-              Action: 'bedrock:*'
-              Resource: '*'
-            - Effect: 'Allow'
-              Action: 'iam:ListRoles'
-              Resource: '*'
-            - Effect: 'Allow'
-              Action:
-                - 's3:Get*',
-                - 's3:List*',
-                - 's3:Describe*',
-                - 's3-object-lambda:Get*',
-                - 's3-object-lambda:List*'
-              Resource: '*'
+  Ec2ExecutionPolicy:
+    Type: 'AWS::IAM::RolePolicy'
+    Properties:
+      PolicyName: !Join
+            - '-'
+            - - 'cfn-macos-execution-policy'
+              - !GetAtt UniqueSuffix.Value
+      RoleName: !Ref Ec2ExecutionRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: 'Allow'# required by cfn-signal: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cfn-helper-scripts-reference.html
+            Action:
+              - 'cloudformation:signalResource'
+              - 'cloudformation:DescribeStackResource'
+            Resource: '*'
+          - Effect: 'Allow'
+            Action: 'sts:*'
+            Resource: '*'
+          - Effect: 'Allow'
+            Action: 'bedrock:*'
+            Resource: '*'
+          - Effect: 'Allow'
+            Action:
+              - 's3:Get*'
+              - 's3:List*'
+              - 's3:Describe*'
+              - 's3-object-lambda:Get*'
+              - 's3-object-lambda:List*'
+            Resource: '*'
 
   InstanceSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: 'Enable SSH access only'
-      GroupName: 'macos-sg'
+      GroupName: !Join
+            - '-'
+            - - 'cfn-macos-sg'
+              - !GetAtt UniqueSuffix.Value
       VpcId: !Ref Vpc
       SecurityGroupIngress:
         - CidrIp: '0.0.0.0/0'
           FromPort: 22  # ssh
           IpProtocol: tcp
           ToPort: 22
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - 'cfn-macos-sg'
+              - !GetAtt UniqueSuffix.Value
+
 
   Vpc:
     Type: AWS::EC2::VPC
@@ -152,6 +177,12 @@ Resources:
       CidrBlock: '10.0.0.0/16'
       EnableDnsHostnames: 'true'
       EnableDnsSupport: 'true'
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - 'cfn-macos-vpc'
+              - !GetAtt UniqueSuffix.Value
 
   Subnet1:
     Type: AWS::EC2::Subnet
@@ -159,9 +190,22 @@ Resources:
       AvailabilityZone: !Ref AvailabilityZone
       CidrBlock: '10.0.10.0/24'
       VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - 'cfn-macos-subnet'
+              - !GetAtt UniqueSuffix.Value
 
   Igw:
     Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - 'cfn-macos-igw'
+              - !GetAtt UniqueSuffix.Value
 
   VpcIgwAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -173,6 +217,12 @@ Resources:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - 'cfn-macos-rtb'
+              - !GetAtt UniqueSuffix.Value
 
   RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
