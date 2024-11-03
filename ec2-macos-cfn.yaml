@@ -12,9 +12,7 @@ Parameters:
   HostId:
     Type: String
     Description: 'Host id'
-    # Default: 'h-05cec09b41d1681aa' # MacOS CFN1
-    # Default: 'h-01ffdad790a25a210' # MacOS CFN2
-    Default: 'h-073d5194aaffa1a41' # MacOS CFN3
+    Default: 'h-073d5194aaffa1a41'
 
   AvailabilityZone:
     Type: String
@@ -26,6 +24,10 @@ Parameters:
     Description: 'Tenancy for instance (= host required when dedicated host)'
     Default: 'host' # default | dedicated | host
 
+  InstanceFamily:
+    Type: String
+    Description: 'Instance type (must match host instance type)'
+    Default: 'mac1'
 
   InstanceType:
     Type: String
@@ -43,15 +45,42 @@ Parameters:
     Description: 'EC2 key for remote access'
     Default: 'macos-didduran-us-east-2'
 
+Conditions:
+
+  NoHost: !Equals
+    - !Ref HostId
+    - ''
+
 Resources:
+
+  InstanceHostId:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Type: 'String'
+      Value: !If [NoHost, !Ref Ec2Host, !Ref HostId]
+
+  Ec2Host:
+    Condition: NoHost
+    Type: AWS::EC2::Host
+    DeletionPolicy: Delete
+    Properties:
+      #InstanceFamily: 'mac1'
+      InstanceType: !Ref InstanceType
+      AvailabilityZone: !Ref AvailabilityZone
+      AutoPlacement: 'off'
+      HostMaintenance: 'off'
+      HostRecovery: 'off'
 
   Ec2Instance:
     Type: AWS::EC2::Instance
+    DeletionPolicy: Delete
     #CreationPolicy:
     # ResourceSignal:
     #   Timeout: 'PT1H'
     Properties:
-      HostId: !Ref HostId
+      HostId: !GetAtt InstanceHostId.Value
+      IamInstanceProfile: !Ref Ec2InstanceProfile
       ImageId: !Ref AmiId
       InstanceType: !Ref InstanceType
       Tenancy: !Ref Tenancy
@@ -71,28 +100,48 @@ Resources:
               - !GetAtt UniqueSuffix.Value
       UserData: !Base64
         Fn::Sub: |
+          # will be located in /private/var/log/install.log
+          touch install.log # will be located in /private/var/log/install.log
           # allow remote screen sharing with MacOS VNC client
-          sudo launchctl enable system/com.apple.screensharing
-          sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist
+          echo "\n\n\nenabling screen sharing..." >> install.log
+          sudo launchctl enable system/com.apple.screensharing >> install.log
+          sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist >> install.log
+          echo "\n\n\nupdating user password..." >> install.lo
+          sudo dscl . -passwd /Users/ec2-user "" "anthropic"
           
           # brew install wget, aws-cli and Python 3.12
-          brew upgrade
-          brew install wget
-          brew install aws-cli
-          brew install python@3.12
+          echo "\n\n\ninstalling prerequisites..." >> install.log
+          brew upgrade >> install.log
+          brew install wget >> install.log
+          brew install jq >> install.log
+          brew install aws-cli >> install.log
+          brew install git >> install.log
+          brew install python@3.12 >> install.log
           
-          # install docker
-          wget --no-check-certificate https://desktop.docker.com/mac/main/amd64/Docker.dmg
-          sudo hdiutil attach Docker.dmg
-          sudo /Volumes/Docker/Docker.app/Contents/MacOS/install
-          sudo hdiutil detach /Volumes/Docker
+          # install and start docker
+          echo "\n\n\ninstalling docker..." >> install.log
+          wget --no-check-certificate https://desktop.docker.com/mac/main/amd64/Docker.dmg >> install.log
+          sudo hdiutil attach -verbose Docker.dmg >> install.log
+          sudo /Volumes/Docker/Docker.app/Contents/MacOS/install --accept-license >> install.log
+          sudo hdiutil detach -verbose /Volumes/Docker >> install.log
+          echo "\n\n\nchecking docker version..." >> install.log
+          docker --version
+          echo "\n\n\nstarting docker..." >> install.log
+          open -a Docker >> install.log
+          
+          # setup and run Anthropic
+          echo "\n\n\ncloning Anthropic quickstarts..." >> install.log
+          git clone https://github.com/anthropics/anthropic-quickstarts.git >> install.log
+          docker pull "ghcr.io/anthropics/anthropic-quickstarts:computer-use-demo-latest" >> install.log
 
-          /usr/bin/pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
-          #/usr/local/bin/cfn-signal -e $? --stack '${AWS::StackName}' --resource 'Ec2Instance' --region '${AWS::Region}'
-
+          # signaling end of CFN stack creation
+          echo "\n\n\nsignalling CFN Stack create completion..." >> install.log
+          /usr/bin/pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz >> install.log
+          /usr/local/bin/cfn-signal -e $? --stack '${AWS::StackName}' --resource 'Ec2Instance' --region '${AWS::Region}' >> install.log
 
   Ec2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
+    DeletionPolicy: Delete
     Properties:
       InstanceProfileName: !Join
             - '-'
@@ -103,6 +152,7 @@ Resources:
 
   Ec2ExecutionRole:
     Type: AWS::IAM::Role
+    DeletionPolicy: Delete
     Properties:
       RoleName: !Join
             - '-'
@@ -120,6 +170,7 @@ Resources:
 
   Ec2ExecutionPolicy:
     Type: 'AWS::IAM::RolePolicy'
+    DeletionPolicy: Delete
     Properties:
       PolicyName: !Join
             - '-'
@@ -151,6 +202,7 @@ Resources:
 
   InstanceSecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Delete
     Properties:
       GroupDescription: 'Enable SSH access only'
       GroupName: !Join
@@ -173,6 +225,7 @@ Resources:
 
   Vpc:
     Type: AWS::EC2::VPC
+    DeletionPolicy: Delete
     Properties:
       CidrBlock: '10.0.0.0/16'
       EnableDnsHostnames: 'true'
@@ -186,6 +239,7 @@ Resources:
 
   Subnet1:
     Type: AWS::EC2::Subnet
+    DeletionPolicy: Delete
     Properties:
       AvailabilityZone: !Ref AvailabilityZone
       CidrBlock: '10.0.10.0/24'
@@ -199,6 +253,7 @@ Resources:
 
   Igw:
     Type: AWS::EC2::InternetGateway
+    DeletionPolicy: Delete
     Properties:
       Tags:
         - Key: Name
@@ -209,12 +264,14 @@ Resources:
 
   VpcIgwAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
+    DeletionPolicy: Delete
     Properties:
       InternetGatewayId: !Ref Igw
       VpcId: !Ref Vpc
 
   RouteTable:
     Type: AWS::EC2::RouteTable
+    DeletionPolicy: Delete
     Properties:
       VpcId: !Ref Vpc
       Tags:
@@ -226,13 +283,15 @@ Resources:
 
   RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
+    DeletionPolicy: Delete
     Properties:
       RouteTableId: !Ref RouteTable
       SubnetId: !Ref Subnet1
 
   DefaultRoute:
-    DependsOn: VpcIgwAttachment
     Type: AWS::EC2::Route
+    DeletionPolicy: Delete
+    DependsOn: VpcIgwAttachment
     Properties:
       DestinationCidrBlock: '0.0.0.0/0'
       GatewayId: !Ref Igw

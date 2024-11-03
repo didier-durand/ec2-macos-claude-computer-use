@@ -17,6 +17,7 @@ brew upgrade
 brew install wget
 brew install aws-cli
 brew install python@3.12
+brew install git
 
 curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
 python3 get-pip.py
