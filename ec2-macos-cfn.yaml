@@ -12,7 +12,7 @@ Parameters:
   HostId:
     Type: String
     Description: 'Host id'
-    Default: 'h-073d5194aaffa1a41'
+    Default: 'h-07bbda4042d6d99b3'
 
   AvailabilityZone:
     Type: String
@@ -100,44 +100,57 @@ Resources:
               - !GetAtt UniqueSuffix.Value
       UserData: !Base64
         Fn::Sub: |
-          # will be located in /private/var/log/install.log
-          touch install.log # will be located in /private/var/log/install.log
+          #!/bin/bash -xe
+          # https://unix.stackexchange.com/questions/61931/redirect-all-subsequent-commands-stderr-using-exec
+          exec > >(tee "/Users/ec2-user/install.log") 2>&1
+          
           # allow remote screen sharing with MacOS VNC client
-          echo "\n\n\nenabling screen sharing..." >> install.log
-          sudo launchctl enable system/com.apple.screensharing >> install.log
-          sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist >> install.log
-          echo "\n\n\nupdating user password..." >> install.lo
-          sudo dscl . -passwd /Users/ec2-user "" "anthropic"
+          echo "\n\n\nenabling screen sharing..."
+          sudo launchctl enable system/com.apple.screensharing
+          sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist 
+          
+          # allow set password for ec2-user
+          # echo "\n\n\nupdating user password..."
+          # sudo dscl . -passwd /Users/ec2-user "" "anthropic"
           
           # brew install wget, aws-cli and Python 3.12
-          echo "\n\n\ninstalling prerequisites..." >> install.log
-          brew upgrade >> install.log
-          brew install wget >> install.log
-          brew install jq >> install.log
-          brew install aws-cli >> install.log
-          brew install git >> install.log
-          brew install python@3.12 >> install.log
+          echo "\n\n\ninstalling prerequisites..."
+          printenv
+          echo "home: $HOME"
+          sleep 2s
+          brew upgrade
+          brew install wget
+          brew install jq
+          brew install aws-cli
+          brew install git
+          brew install python@3.12
           
           # install and start docker
-          echo "\n\n\ninstalling docker..." >> install.log
-          wget --no-check-certificate https://desktop.docker.com/mac/main/amd64/Docker.dmg >> install.log
-          sudo hdiutil attach -verbose Docker.dmg >> install.log
-          sudo /Volumes/Docker/Docker.app/Contents/MacOS/install --accept-license >> install.log
-          sudo hdiutil detach -verbose /Volumes/Docker >> install.log
-          echo "\n\n\nchecking docker version..." >> install.log
-          docker --version
-          echo "\n\n\nstarting docker..." >> install.log
-          open -a Docker >> install.log
-          
-          # setup and run Anthropic
-          echo "\n\n\ncloning Anthropic quickstarts..." >> install.log
-          git clone https://github.com/anthropics/anthropic-quickstarts.git >> install.log
-          docker pull "ghcr.io/anthropics/anthropic-quickstarts:computer-use-demo-latest" >> install.log
+          echo "\n\n\ninstalling docker..."
+          wget --no-check-certificate https://desktop.docker.com/mac/main/amd64/Docker.dmg
+#          sudo hdiutil attach -verbose Docker.dmg
+  # sleep 5s
+#          sudo /Volumes/Docker/Docker.app/Contents/MacOS/install --accept-license
+#          sudo hdiutil detach -verbose /Volumes/Docker
+#          echo "\n\n\nchecking docker version..."
+#          docker --version
+#          echo "\n\n\nstarting docker..."
+#          open -a Docker
+#
+#          # setup and run Anthropic
+#          echo "\n\n\ncloning Anthropic quickstarts..."
+#          git clone https://github.com/anthropics/anthropic-quickstarts.git
+#          docker pull "ghcr.io/anthropics/anthropic-quickstarts:computer-use-demo-latest"
 
-          # signaling end of CFN stack creation
-          echo "\n\n\nsignalling CFN Stack create completion..." >> install.log
-          /usr/bin/pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz >> install.log
-          /usr/local/bin/cfn-signal -e $? --stack '${AWS::StackName}' --resource 'Ec2Instance' --region '${AWS::Region}' >> install.log
+#.         # https://docs.aws.amazon.com/cli/latest/reference/sts/get-session-token.html
+# aws sts get-session-token \
+# --duration-seconds 43300
+
+#
+#          # signaling end of CFN stack creation
+#          echo "\n\n\nsignalling CFN Stack create completion..."
+#          /usr/bin/pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+#          /usr/local/bin/cfn-signal -e $? --stack '${AWS::StackName}' --resource 'Ec2Instance' --region '${AWS::Region}'
 
   Ec2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
