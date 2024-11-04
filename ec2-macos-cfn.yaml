@@ -12,7 +12,7 @@ Parameters:
   HostId:
     Type: String
     Description: 'Host id'
-    Default: 'h-07bbda4042d6d99b3'
+    Default: 'h-073d5194aaffa1a41'
 
   AvailabilityZone:
     Type: String
@@ -23,11 +23,6 @@ Parameters:
     Type: String
     Description: 'Tenancy for instance (= host required when dedicated host)'
     Default: 'host' # default | dedicated | host
-
-  InstanceFamily:
-    Type: String
-    Description: 'Instance type (must match host instance type)'
-    Default: 'mac1'
 
   InstanceType:
     Type: String
@@ -101,6 +96,8 @@ Resources:
       UserData: !Base64
         Fn::Sub: |
           #!/bin/bash -xe
+          
+          # routing all command outputs to log file
           # https://unix.stackexchange.com/questions/61931/redirect-all-subsequent-commands-stderr-using-exec
           exec > >(tee "/Users/ec2-user/install.log") 2>&1
           
@@ -109,29 +106,37 @@ Resources:
           sudo launchctl enable system/com.apple.screensharing
           sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist 
           
-          # allow set password for ec2-user
-          # echo "\n\n\nupdating user password..."
-          # sudo dscl . -passwd /Users/ec2-user "" "anthropic"
+          # set HOME and password for ec2-user
+          echo "\n\n\nupdating ec2-user $HOME and password..."
+          export HOME="/Users/ec2-user" # HOME not set when running from UserData but required by brew
+          sudo dscl . -passwd /Users/ec2-user "anthropic"
+    
+          # obtain current credentials from instance metadata 
+          export AWS_CREDENTIALS=$(TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"` && curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/identity-credentials/ec2/security-credentials/ec2-instance)
+          export AWS_ACCESS_KEY_ID=$(echo $AWS_CREDENTIALS | jq '.AccessKeyId')
+          export AWS_SECRET_ACCESS_KEY=$(echo $AWS_CREDENTIALS | jq '.SecretAccessKey')
+          export AWS_SECRET_SESSION_TOKEN=$(echo $AWS_CREDENTIALS | jq '.Token')
+          printenv
           
           # brew install wget, aws-cli and Python 3.12
           echo "\n\n\ninstalling prerequisites..."
-          printenv
-          echo "home: $HOME"
-          sleep 2s
-          brew upgrade
-          brew install wget
-          brew install jq
-          brew install aws-cli
-          brew install git
-          brew install python@3.12
+          # brew will NOT accept to run under root. It must run under ec2-user
+          sudo -iu ec2-user brew upgrade
+          sudo -iu ec2-user brew install wget
+          sudo -iu ec2-user brew install jq
+          sudo -iu ec2-user brew install aws-cli
+          sudo -iu ec2-user brew install git
+          sudo -iu ec2-user brew install python@3.12
           
           # install and start docker
           echo "\n\n\ninstalling docker..."
           wget --no-check-certificate https://desktop.docker.com/mac/main/amd64/Docker.dmg
-#          sudo hdiutil attach -verbose Docker.dmg
-  # sleep 5s
+          sudo hdiutil attach -verbose Docker.dmg
+          sleep 3s
 #          sudo /Volumes/Docker/Docker.app/Contents/MacOS/install --accept-license
+#          sleep 3s
 #          sudo hdiutil detach -verbose /Volumes/Docker
+#          sleep 3s
 #          echo "\n\n\nchecking docker version..."
 #          docker --version
 #          echo "\n\n\nstarting docker..."
@@ -141,11 +146,6 @@ Resources:
 #          echo "\n\n\ncloning Anthropic quickstarts..."
 #          git clone https://github.com/anthropics/anthropic-quickstarts.git
 #          docker pull "ghcr.io/anthropics/anthropic-quickstarts:computer-use-demo-latest"
-
-#.         # https://docs.aws.amazon.com/cli/latest/reference/sts/get-session-token.html
-# aws sts get-session-token \
-# --duration-seconds 43300
-
 #
 #          # signaling end of CFN stack creation
 #          echo "\n\n\nsignalling CFN Stack create completion..."
