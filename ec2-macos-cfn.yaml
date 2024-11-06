@@ -5,14 +5,12 @@
 
 AWSTemplateFormatVersion: 2010-09-09
 
-#role: arn:aws:iam::076516228660:role/bedrock-full-access-role
-
 Parameters:
 
   HostId:
     Type: String
     Description: 'Host id'
-    Default: 'h-073d5194aaffa1a41'
+    Default: 'h-0583573f3cbaa1201'
 
   AvailabilityZone:
     Type: String
@@ -60,7 +58,6 @@ Resources:
     Type: AWS::EC2::Host
     DeletionPolicy: Delete
     Properties:
-      #InstanceFamily: 'mac1'
       InstanceType: !Ref InstanceType
       AvailabilityZone: !Ref AvailabilityZone
       AutoPlacement: 'off'
@@ -70,9 +67,9 @@ Resources:
   Ec2Instance:
     Type: AWS::EC2::Instance
     DeletionPolicy: Delete
-    #CreationPolicy:
-    # ResourceSignal:
-    #   Timeout: 'PT1H'
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: 'PT1H'
     Properties:
       HostId: !GetAtt InstanceHostId.Value
       IamInstanceProfile: !Ref Ec2InstanceProfile
@@ -119,24 +116,47 @@ Resources:
           printenv
           
           # brew install wget, aws-cli and Python 3.12
-          echo "\n\n\ninstalling prerequisites..."
           # brew will NOT accept to run under root. It must run under ec2-user
+          echo "\n\n\ninstalling prerequisites..."
           sudo -iu ec2-user brew upgrade
           sudo -iu ec2-user brew install wget
           sudo -iu ec2-user brew install jq
-          sudo -iu ec2-user brew install aws-cli
+          sudo -iu ec2-user brew install awscli
           sudo -iu ec2-user brew install git
           sudo -iu ec2-user brew install python@3.12
+          sudo -iu ec2-user brew install podman
+          sudo -iu ec2-user brew install podman-desktop
           
-          # install and start docker
-          echo "\n\n\ninstalling docker..."
-          wget --no-check-certificate https://desktop.docker.com/mac/main/amd64/Docker.dmg
-          sudo hdiutil attach -verbose Docker.dmg
-          sleep 3s
+          # initialize podman
+          echo "\n\n\ninitializing podman..."
+          sudo -iu ec2-user podman machine init
+          sudo -iu ec2-user podman machine start
+          sudo -iu ec2-user podman info
+          
+          # cloning Anthropic project
+          echo "\n\n\ncloning Anthropic quickstarts..."
+          cd $HOME # to avoid trying to write in protected system file system
+          git clone https://github.com/anthropics/anthropic-quickstarts.git
+          
+          # pulling Anthropic container image
+          echo "\n\n\npulling Anthropic container image..."
+          sudo -iu ec2-user podman pull --quiet "ghcr.io/anthropics/anthropic-quickstarts:computer-use-demo-latest"
+          sudo -iu ec2-user podman images
+          
+          # signaling end of CFN stack creation
+          echo "\n\n\nsignalling CFN Stack create completion..."
+          /usr/bin/pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+          /usr/local/bin/cfn-signal -e $? --stack '${AWS::StackName}' --resource 'Ec2Instance' --region '${AWS::Region}'
+          
+          
+#          # install and start docker
+#          echo "\n\n\ninstalling docker..."
+#          cd $HOME # to avoid trying to write in protected system file system
+#          wget --quiet --no-check-certificate https://desktop.docker.com/mac/main/amd64/Docker.dmg
+#          ls -lh Docker.dmg
+#          sudo hdiutil attach -verbose Docker.dmg
 #          sudo /Volumes/Docker/Docker.app/Contents/MacOS/install --accept-license
-#          sleep 3s
-#          sudo hdiutil detach -verbose /Volumes/Docker
-#          sleep 3s
+#          sudo ec2-user hdiutil detach -verbose /Volumes/Docker
 #          echo "\n\n\nchecking docker version..."
 #          docker --version
 #          echo "\n\n\nstarting docker..."
@@ -146,7 +166,8 @@ Resources:
 #          echo "\n\n\ncloning Anthropic quickstarts..."
 #          git clone https://github.com/anthropics/anthropic-quickstarts.git
 #          docker pull "ghcr.io/anthropics/anthropic-quickstarts:computer-use-demo-latest"
-#
+#          docker images
+
 #          # signaling end of CFN stack creation
 #          echo "\n\n\nsignalling CFN Stack create completion..."
 #          /usr/bin/pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
